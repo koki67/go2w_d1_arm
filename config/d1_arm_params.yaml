@@ -1,0 +1,17 @@
+/**:
+  ros__parameters:
+    network_interface: ""
+    joint_names:
+      - d1_joint_0
+      - d1_joint_1
+      - d1_joint_2
+      - d1_joint_3
+      - d1_joint_4
+      - d1_joint_5
+      - d1_joint_6
+    require_enable_before_motion: true
+    enable_on_start: false
+    zero_on_start: false
+    multi_joint_mode: 1
+    lock_force: 80000
+

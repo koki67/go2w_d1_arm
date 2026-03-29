@@ -1,0 +1,7 @@
+uint8 joint_id
+float64 angle_rad
+int32 delay_ms
+---
+bool accepted
+string message
+
