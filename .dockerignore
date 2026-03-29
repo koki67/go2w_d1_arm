@@ -5,4 +5,5 @@ install
 log
 docker/.env
 third_party/unitree_sdk2/.git
-
+__pycache__/
+*.pyc
