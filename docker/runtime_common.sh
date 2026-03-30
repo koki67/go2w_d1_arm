@@ -75,17 +75,6 @@ print_runtime_summary() {
   echo "[go2w_d1_arm] detected network interfaces: $(joined_network_interfaces)"
 }
 
-ensure_cyclonedds_uri() {
-  local rmw="${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}"
-  local ros_interface="${ROS_NETWORK_INTERFACE:-wlan0}"
-
-  if [ "$rmw" != "rmw_cyclonedds_cpp" ] || [ -n "${CYCLONEDDS_URI:-}" ]; then
-    return
-  fi
-
-  export CYCLONEDDS_URI="<CycloneDDS><Domain><General><Interfaces><NetworkInterface name=\"${ros_interface}\" priority=\"default\" multicast=\"default\" /></Interfaces></General></Domain></CycloneDDS>"
-}
-
 validate_runtime_artifacts() {
   require_file /ros2_ws/install/setup.bash "workspace setup"
   require_file /ros2_ws/install/go2w_d1_arm/lib/go2w_d1_arm/d1_arm_bridge_node "bridge executable"

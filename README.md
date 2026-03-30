@@ -36,11 +36,14 @@ colcon build --packages-select go2w_d1_arm
 
 ## Run On The Robot
 
-Typical GO2-W settings:
+Standard GO2-W runtime contract:
+
+- `eth0` is used for the D1 arm / Unitree SDK side
+- `wlan0` is used for ROS 2 DDS so a desktop PC can communicate over WiFi
+
+The container now sets this contract internally. For the normal robot workflow, no host-side DDS environment variables are required.
 
 ```bash
-export UNITREE_NETWORK_INTERFACE=eth0
-export ROS_NETWORK_INTERFACE=wlan0
 make up
 ```
 
@@ -61,11 +64,13 @@ make shell
 With CycloneDDS on the desktop PC:
 
 ```bash
+source /opt/ros/humble/setup.bash
 export ROS_DOMAIN_ID=0
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 export CYCLONEDDS_URI='<CycloneDDS><Domain><General><Interfaces><NetworkInterface name="enp97s0"/></Interfaces></General></Domain></CycloneDDS>'
 ros2 topic echo /joint_states
 ros2 service call /enable std_srvs/srv/Trigger "{}"
+ros2 topic pub --once /joint_command sensor_msgs/msg/JointState "{name: ['d1_joint_0', 'd1_joint_1', 'd1_joint_2', 'd1_joint_3', 'd1_joint_4', 'd1_joint_5', 'd1_joint_6'], position: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]}"
 ```
 
 ## Topics And Services
@@ -92,6 +97,6 @@ Services:
 ## Notes
 
 - The bridge gates motion commands until `enable` succeeds when `require_enable_before_motion` is `true`.
-- If two CycloneDDS participants in the same process conflict on the target system, set `RMW_IMPLEMENTATION=rmw_fastrtps_cpp` before `make up`.
-- `UNITREE_NETWORK_INTERFACE` selects the arm-side Ethernet interface for the Unitree SDK. `ROS_NETWORK_INTERFACE` selects the ROS 2-facing interface used in the default `CYCLONEDDS_URI`.
-
+- `make up`, `make doctor`, and `make shell` all source the same in-container runtime setup so the ROS 2 and DDS environment stays consistent.
+- Startup fails fast if the robot-side `wlan0` interface is not present, because desktop-over-WiFi is the intended control path for this repository.
+- If two CycloneDDS participants in the same process conflict on the target system, run `RMW_IMPLEMENTATION=rmw_fastrtps_cpp make up` for the documented fallback path.

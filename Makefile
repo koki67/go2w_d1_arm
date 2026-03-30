@@ -1,6 +1,6 @@
 COMPOSE := ./docker/run.sh
 SERVICE := d1_arm_bridge
-ROS_SETUP := source /opt/ros/humble/setup.bash && source /ros2_ws/install/setup.bash
+ROS_SETUP := source /setup_condition.sh
 
 .PHONY: build up down ps logs restart shell doctor help
 
@@ -31,4 +31,3 @@ doctor:           ## Run container preflight without starting the bridge
 
 help:             ## Show this help
 	@grep -E '^[a-z_-]+:.*##' $(MAKEFILE_LIST) | awk -F ':.*## ' '{printf "  make %-12s %s\n", $$1, $$2}'
-

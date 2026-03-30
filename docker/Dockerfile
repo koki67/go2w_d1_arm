@@ -43,10 +43,10 @@ RUN /bin/bash -lc "\
 
 COPY docker/entrypoint.sh /entrypoint.sh
 COPY docker/runtime_common.sh /runtime_common.sh
+COPY docker/setup_condition.sh /setup_condition.sh
 COPY docker/start_bridge.sh /start_bridge.sh
 COPY docker/doctor.sh /doctor.sh
-RUN chmod +x /entrypoint.sh /runtime_common.sh /start_bridge.sh /doctor.sh
+RUN chmod +x /entrypoint.sh /runtime_common.sh /setup_condition.sh /start_bridge.sh /doctor.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["/start_bridge.sh"]
-
