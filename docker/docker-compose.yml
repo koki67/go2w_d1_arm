@@ -4,7 +4,6 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     image: go2w_d1_arm:humble
-    container_name: go2w_d1_arm
     network_mode: host
     environment:
       RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
