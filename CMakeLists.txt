@@ -11,15 +11,12 @@ find_package(sensor_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(std_srvs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(Threads REQUIRED)
 
-find_package(unitree_sdk2 CONFIG QUIET)
-if(NOT unitree_sdk2_FOUND)
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/unitree_sdk2/CMakeLists.txt")
-    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-    add_subdirectory(third_party/unitree_sdk2 EXCLUDE_FROM_ALL)
-  else()
-    message(FATAL_ERROR "unitree_sdk2 not found. Populate third_party/unitree_sdk2 or install /opt/unitree_robotics.")
-  endif()
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
+  set(UNITREE_THIRDPARTY_ARCH aarch64)
+else()
+  set(UNITREE_THIRDPARTY_ARCH x86_64)
 endif()
 
 find_path(
@@ -27,9 +24,38 @@ find_path(
   dds/topic/TopicTraits.hpp
   PATHS
     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/unitree_sdk2/thirdparty/include/ddscxx"
-    /opt/unitree_robotics/include/ddscxx
-    /usr/local/include/ddscxx
+    /usr/include/ddscxx
 )
+
+find_path(
+  DDSC_INCLUDE_DIR
+  dds/dds.h
+  PATHS
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/unitree_sdk2/thirdparty/include"
+    /usr/include
+)
+
+find_library(
+  DDSCXX_LIBRARY
+  NAMES ddscxx
+  PATHS
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/unitree_sdk2/thirdparty/lib/${UNITREE_THIRDPARTY_ARCH}"
+    /usr/lib
+    /usr/lib/${CMAKE_LIBRARY_ARCHITECTURE}
+)
+
+find_library(
+  DDSC_LIBRARY
+  NAMES ddsc
+  PATHS
+    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/unitree_sdk2/thirdparty/lib/${UNITREE_THIRDPARTY_ARCH}"
+    /usr/lib
+    /usr/lib/${CMAKE_LIBRARY_ARCHITECTURE}
+)
+
+if(NOT DDSCXX_INCLUDE_DIR OR NOT DDSC_INCLUDE_DIR OR NOT DDSCXX_LIBRARY OR NOT DDSC_LIBRARY)
+  message(FATAL_ERROR "CycloneDDS C/C++ headers or libraries were not found. Populate third_party/unitree_sdk2 or install CycloneDDS development packages.")
+endif()
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/D1ArmStatus.msg"
@@ -43,13 +69,30 @@ add_executable(d1_arm_bridge_node
   src/msg/PubServoInfo_.cpp
 )
 
-target_compile_features(d1_arm_bridge_node PRIVATE cxx_std_17)
-target_include_directories(d1_arm_bridge_node PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/src
+add_executable(d1_arm_transport
+  src/d1_arm_transport.cpp
+  src/msg/ArmString_.cpp
+  src/msg/PubServoInfo_.cpp
 )
-if(DDSCXX_INCLUDE_DIR)
-  target_include_directories(d1_arm_bridge_node PRIVATE ${DDSCXX_INCLUDE_DIR})
-endif()
+
+foreach(target_name d1_arm_bridge_node d1_arm_transport)
+  target_compile_features(${target_name} PRIVATE cxx_std_17)
+  target_include_directories(${target_name} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${DDSCXX_INCLUDE_DIR}
+    ${DDSC_INCLUDE_DIR}
+  )
+  target_link_libraries(${target_name}
+    ${DDSCXX_LIBRARY}
+    ${DDSC_LIBRARY}
+    Threads::Threads
+  )
+  get_filename_component(DDS_LIBRARY_DIR "${DDSCXX_LIBRARY}" DIRECTORY)
+  set_target_properties(${target_name} PROPERTIES
+    BUILD_RPATH "${DDS_LIBRARY_DIR}"
+    INSTALL_RPATH "$ORIGIN"
+  )
+endforeach()
 
 ament_target_dependencies(d1_arm_bridge_node
   rclcpp
@@ -60,11 +103,19 @@ ament_target_dependencies(d1_arm_bridge_node
 
 rosidl_get_typesupport_target(cpp_typesupport_target ${PROJECT_NAME} "rosidl_typesupport_cpp")
 target_link_libraries(d1_arm_bridge_node
-  unitree_sdk2
+  ${cpp_typesupport_target}
+)
+target_link_libraries(d1_arm_transport
   ${cpp_typesupport_target}
 )
 
-install(TARGETS d1_arm_bridge_node
+install(TARGETS d1_arm_bridge_node d1_arm_transport
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+install(FILES
+  ${DDSCXX_LIBRARY}
+  ${DDSC_LIBRARY}
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -85,4 +136,3 @@ if(BUILD_TESTING)
 endif()
 
 ament_package()
-

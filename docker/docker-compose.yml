@@ -8,6 +8,9 @@ services:
     environment:
       RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+      UNITREE_NETWORK_INTERFACE: ${UNITREE_NETWORK_INTERFACE:-}
+      ROS_NETWORK_INTERFACE: ${ROS_NETWORK_INTERFACE:-}
+      D1_TRANSPORT_SOCKET_PATH: ${D1_TRANSPORT_SOCKET_PATH:-}
     command: ["/start_bridge.sh"]
     stdin_open: true
     tty: true

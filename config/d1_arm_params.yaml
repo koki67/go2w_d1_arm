@@ -1,6 +1,6 @@
 /**:
   ros__parameters:
-    network_interface: ""
+    transport_socket_path: "/tmp/go2w_d1_arm.sock"
     joint_names:
       - d1_joint_0
       - d1_joint_1
@@ -14,4 +14,3 @@
     zero_on_start: false
     multi_joint_mode: 1
     lock_force: 80000
-

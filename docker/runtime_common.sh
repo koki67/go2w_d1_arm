@@ -69,7 +69,10 @@ print_runtime_summary() {
   echo "[go2w_d1_arm] ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-<unset>}"
   echo "[go2w_d1_arm] UNITREE_NETWORK_INTERFACE=${UNITREE_NETWORK_INTERFACE:-<unset>}"
   echo "[go2w_d1_arm] ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-<unset>}"
+  echo "[go2w_d1_arm] D1_TRANSPORT_SOCKET_PATH=${D1_TRANSPORT_SOCKET_PATH:-<unset>}"
   echo "[go2w_d1_arm] CYCLONEDDS_URI=${CYCLONEDDS_URI:-<unset>}"
+  echo "[go2w_d1_arm] ROS_CYCLONEDDS_URI=${ROS_CYCLONEDDS_URI:-<unset>}"
+  echo "[go2w_d1_arm] D1_TRANSPORT_CYCLONEDDS_URI=${D1_TRANSPORT_CYCLONEDDS_URI:-<unset>}"
 
   readarray_network_interfaces
   echo "[go2w_d1_arm] detected network interfaces: $(joined_network_interfaces)"
@@ -78,6 +81,7 @@ print_runtime_summary() {
 validate_runtime_artifacts() {
   require_file /ros2_ws/install/setup.bash "workspace setup"
   require_file /ros2_ws/install/go2w_d1_arm/lib/go2w_d1_arm/d1_arm_bridge_node "bridge executable"
+  require_file /ros2_ws/install/go2w_d1_arm/lib/go2w_d1_arm/d1_arm_transport "transport executable"
 }
 
 validate_selected_interface() {
@@ -99,11 +103,11 @@ validate_rmw_implementation() {
   local rmw="${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}"
 
   case "$rmw" in
-    rmw_cyclonedds_cpp|rmw_fastrtps_cpp)
+    rmw_cyclonedds_cpp)
       ;;
     *)
       runtime_error \
-        "unsupported RMW_IMPLEMENTATION=${rmw}. Use rmw_cyclonedds_cpp or rmw_fastrtps_cpp."
+        "unsupported RMW_IMPLEMENTATION=${rmw}. This repository now uses rmw_cyclonedds_cpp only."
       ;;
   esac
 }

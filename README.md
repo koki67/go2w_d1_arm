@@ -8,12 +8,12 @@
 - Publishes parsed `arm_status` and passthrough `raw_feedback`
 - Accepts `joint_command` as a 7-joint ROS `sensor_msgs/msg/JointState`
 - Exposes `enable`, `disable`, `power_on`, `power_off`, `zero`, and `single_joint_command`
-- Uses a vendored `unitree_sdk2` git submodule plus the required DDS entity patch for coexistence with ROS 2 DDS
-- Defaults to `rmw_cyclonedds_cpp` for ROS 2, with `rmw_fastrtps_cpp` available as a fallback
+- Uses raw CycloneDDS transport for the D1 arm plus a separate ROS 2 CycloneDDS bridge process
+- Keeps the D1 transport process on `eth0` and the ROS 2 bridge process on `wlan0`
 
 ## Repository Setup
 
-The `unitree_sdk2` submodule is tracked at `third_party/unitree_sdk2`.
+The `unitree_sdk2` submodule is still tracked at `third_party/unitree_sdk2`, but only for the vendored CycloneDDS headers, libraries, and upstream DDS examples used by this package.
 
 ```bash
 git submodule update --init --recursive
@@ -38,11 +38,13 @@ colcon build --packages-select go2w_d1_arm
 
 Standard GO2-W runtime contract:
 
-- `eth0` is used for the D1 arm / Unitree SDK side
-- `wlan0` is used for ROS 2 DDS so a desktop PC can communicate over WiFi
-- The container's CycloneDDS config includes both interfaces because the same bridge process hosts both participants
+- `eth0` is used for the D1 arm DDS transport side by default
+- `wlan0` is used for ROS 2 DDS so a desktop PC can communicate over WiFi by default
+- The container starts two processes:
+  - a raw D1 CycloneDDS transport on `eth0`
+  - a ROS 2 CycloneDDS bridge on `wlan0`
 
-The container now sets this contract internally. For the normal robot workflow, no host-side DDS environment variables are required.
+The container now sets this contract internally. For the normal robot workflow, no host-side DDS environment variables are required. If a nonstandard NIC name is needed, you can still override `UNITREE_NETWORK_INTERFACE` and `ROS_NETWORK_INTERFACE` when invoking `make`.
 
 ```bash
 make up
@@ -100,5 +102,5 @@ Services:
 - The bridge gates motion commands until `enable` succeeds when `require_enable_before_motion` is `true`.
 - `make up`, `make doctor`, and `make shell` all source the same in-container runtime setup so the ROS 2 and DDS environment stays consistent.
 - Startup fails fast if the robot-side `wlan0` interface is not present, because desktop-over-WiFi is the intended control path for this repository.
-- The robot-side CycloneDDS config intentionally enables both `eth0` and `wlan0`: `eth0` is required for the Unitree SDK DDS channels inside the bridge process, and `wlan0` exposes the ROS 2 side to the desktop PC.
-- If two CycloneDDS participants in the same process conflict on the target system, run `RMW_IMPLEMENTATION=rmw_fastrtps_cpp make up` for the documented fallback path.
+- The bridge no longer relies on `unitree_sdk2` runtime channel wrappers. The D1 arm transport uses raw CycloneDDS in its own process and exchanges data with the ROS bridge over a local Unix socket.
+- The split-process design keeps this repository CycloneDDS-only while avoiding the previous same-process DDS participant conflict.

@@ -2,39 +2,39 @@
 #include <array>
 #include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <mutex>
-#include <net/if.h>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
+
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <unistd.h>
 
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <std_srvs/srv/trigger.hpp>
-#include <unitree/robot/channel/channel_factory.hpp>
-#include <unitree/robot/channel/channel_publisher.hpp>
-#include <unitree/robot/channel/channel_subscriber.hpp>
 
+#include "d1_transport_ipc.hpp"
 #include "go2w_d1_arm/msg/d1_arm_status.hpp"
 #include "go2w_d1_arm/srv/single_joint_command.hpp"
-#include "msg/ArmString_.hpp"
-#include "msg/PubServoInfo_.hpp"
 
 namespace
 {
-constexpr char kCommandTopic[] = "rt/arm_Command";
-constexpr char kServoTopic[] = "current_servo_angle";
-constexpr char kFeedbackTopic[] = "arm_Feedback";
-constexpr std::size_t kJointCount = 7;
 constexpr double kPi = 3.14159265358979323846;
+constexpr std::chrono::milliseconds kTransportConnectRetrySleep{100};
+constexpr std::chrono::seconds kTransportConnectTimeout{5};
 
 double DegreesToRadians(double degrees)
 {
@@ -59,39 +59,13 @@ std::vector<std::string> DefaultJointNames()
   };
 }
 
-std::vector<std::string> AvailableNetworkInterfaces()
+std::string DefaultTransportSocketPath()
 {
-  std::vector<std::string> interfaces;
-  struct if_nameindex * indexed_interfaces = ::if_nameindex();
-  if (indexed_interfaces == nullptr) {
-    return interfaces;
+  const char * env_value = std::getenv("D1_TRANSPORT_SOCKET_PATH");
+  if (env_value != nullptr && env_value[0] != '\0') {
+    return std::string(env_value);
   }
-
-  for (struct if_nameindex * entry = indexed_interfaces;
-    entry->if_index != 0 || entry->if_name != nullptr;
-    ++entry)
-  {
-    if (entry->if_name != nullptr) {
-      interfaces.emplace_back(entry->if_name);
-    }
-  }
-
-  if_freenameindex(indexed_interfaces);
-  std::sort(interfaces.begin(), interfaces.end());
-  interfaces.erase(std::unique(interfaces.begin(), interfaces.end()), interfaces.end());
-  return interfaces;
-}
-
-std::string JoinStrings(const std::vector<std::string> & values)
-{
-  std::ostringstream stream;
-  for (std::size_t i = 0; i < values.size(); ++i) {
-    if (i > 0) {
-      stream << ", ";
-    }
-    stream << values[i];
-  }
-  return stream.str();
+  return go2w_d1_arm::ipc::kDefaultSocketPath;
 }
 
 std::optional<std::string> ExtractJsonScalar(const std::string & json, const std::string & key)
@@ -158,6 +132,239 @@ std::optional<int> ExtractJsonInt(const std::string & json, const std::string & 
     return std::nullopt;
   }
 }
+
+class D1TransportClient
+{
+public:
+  using ServoCallback =
+    std::function<void(const std::array<double, go2w_d1_arm::ipc::kJointCount> &)>;
+  using FeedbackCallback = std::function<void(const std::string &)>;
+
+  D1TransportClient(std::string socket_path, rclcpp::Logger logger)
+  : socket_path_(std::move(socket_path)),
+    logger_(std::move(logger))
+  {
+  }
+
+  ~D1TransportClient()
+  {
+    Stop();
+  }
+
+  void ConnectOrThrow(std::chrono::milliseconds timeout)
+  {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+
+    while (std::chrono::steady_clock::now() < deadline) {
+      if (TryConnect()) {
+        return;
+      }
+      std::this_thread::sleep_for(kTransportConnectRetrySleep);
+    }
+
+    throw std::runtime_error(
+            "timed out waiting for D1 transport socket at " + socket_path_);
+  }
+
+  void Start(ServoCallback servo_callback, FeedbackCallback feedback_callback)
+  {
+    servo_callback_ = std::move(servo_callback);
+    feedback_callback_ = std::move(feedback_callback);
+    stop_requested_.store(false);
+    reader_thread_ = std::thread(&D1TransportClient::ReaderLoop, this);
+  }
+
+  void Stop()
+  {
+    stop_requested_.store(true);
+    ShutdownSocket();
+
+    if (reader_thread_.joinable()) {
+      reader_thread_.join();
+    }
+
+    CloseSocket();
+  }
+
+  bool SendCommand(const std::string & payload, std::string * error_message)
+  {
+    std::lock_guard<std::mutex> lock(write_mutex_);
+
+    const int socket_fd = socket_fd_.load();
+    if (socket_fd < 0) {
+      if (error_message != nullptr) {
+        *error_message = "transport socket is not connected";
+      }
+      return false;
+    }
+
+    const std::string wire_message = go2w_d1_arm::ipc::BuildCommandLine(payload) + "\n";
+    std::size_t written = 0;
+    while (written < wire_message.size()) {
+      const ssize_t result = send(
+        socket_fd,
+        wire_message.data() + written,
+        wire_message.size() - written,
+        MSG_NOSIGNAL);
+      if (result > 0) {
+        written += static_cast<std::size_t>(result);
+        continue;
+      }
+      if (result < 0 && errno == EINTR) {
+        continue;
+      }
+
+      if (error_message != nullptr) {
+        *error_message = result < 0 ? std::strerror(errno) : "send() failed";
+      }
+      CloseSocketLocked();
+      return false;
+    }
+
+    return true;
+  }
+
+private:
+  bool TryConnect()
+  {
+    const int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    if (fd < 0) {
+      throw std::runtime_error("failed to create UNIX socket");
+    }
+
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    if (socket_path_.size() >= sizeof(address.sun_path)) {
+      close(fd);
+      throw std::runtime_error("transport socket path is too long: " + socket_path_);
+    }
+    std::strncpy(address.sun_path, socket_path_.c_str(), sizeof(address.sun_path) - 1);
+
+    if (connect(fd, reinterpret_cast<sockaddr *>(&address), sizeof(address)) < 0) {
+      close(fd);
+      if (errno == ENOENT || errno == ECONNREFUSED) {
+        return false;
+      }
+      throw std::runtime_error(
+              "failed to connect to transport socket '" + socket_path_ + "': " + std::strerror(errno));
+    }
+
+    socket_fd_.store(fd);
+    read_buffer_.clear();
+    return true;
+  }
+
+  void ShutdownSocket()
+  {
+    std::lock_guard<std::mutex> lock(write_mutex_);
+    const int socket_fd = socket_fd_.load();
+    if (socket_fd >= 0) {
+      shutdown(socket_fd, SHUT_RDWR);
+    }
+  }
+
+  void CloseSocket()
+  {
+    std::lock_guard<std::mutex> lock(write_mutex_);
+    CloseSocketLocked();
+  }
+
+  void CloseSocketLocked()
+  {
+    const int socket_fd = socket_fd_.load();
+    if (socket_fd >= 0) {
+      close(socket_fd);
+      socket_fd_.store(-1);
+    }
+    read_buffer_.clear();
+  }
+
+  void ReaderLoop()
+  {
+    while (!stop_requested_.load()) {
+      char buffer[4096];
+      const int socket_fd = socket_fd_.load();
+      if (socket_fd < 0) {
+        return;
+      }
+      const ssize_t received = recv(socket_fd, buffer, sizeof(buffer), 0);
+      if (received > 0) {
+        read_buffer_.append(buffer, static_cast<std::size_t>(received));
+        DrainBufferedLines();
+        continue;
+      }
+
+      if (received == 0) {
+        if (!stop_requested_.load()) {
+          RCLCPP_ERROR(logger_, "D1 transport socket closed");
+        }
+        CloseSocket();
+        return;
+      }
+
+      if (errno == EINTR) {
+        continue;
+      }
+      if (errno == EBADF || errno == ENOTCONN) {
+        return;
+      }
+
+      if (!stop_requested_.load()) {
+        RCLCPP_ERROR(logger_, "D1 transport recv failed: %s", std::strerror(errno));
+      }
+      CloseSocket();
+      return;
+    }
+  }
+
+  void DrainBufferedLines()
+  {
+    std::size_t newline_position = read_buffer_.find('\n');
+    while (newline_position != std::string::npos) {
+      std::string line = read_buffer_.substr(0, newline_position);
+      if (!line.empty() && line.back() == '\r') {
+        line.pop_back();
+      }
+      read_buffer_.erase(0, newline_position + 1);
+
+      if (!line.empty()) {
+        DispatchLine(line);
+      }
+      newline_position = read_buffer_.find('\n');
+    }
+  }
+
+  void DispatchLine(const std::string & line)
+  {
+    std::array<double, go2w_d1_arm::ipc::kJointCount> positions_deg{};
+    if (go2w_d1_arm::ipc::ParseServoLine(line, &positions_deg)) {
+      if (servo_callback_) {
+        servo_callback_(positions_deg);
+      }
+      return;
+    }
+
+    std::string feedback;
+    if (go2w_d1_arm::ipc::ParseFeedbackLine(line, &feedback)) {
+      if (feedback_callback_) {
+        feedback_callback_(feedback);
+      }
+      return;
+    }
+
+    RCLCPP_WARN(logger_, "Ignoring malformed D1 transport message: %s", line.c_str());
+  }
+
+  std::string socket_path_;
+  rclcpp::Logger logger_;
+  std::atomic_int socket_fd_{-1};
+  std::atomic_bool stop_requested_{false};
+  std::mutex write_mutex_;
+  std::thread reader_thread_;
+  std::string read_buffer_;
+  ServoCallback servo_callback_;
+  FeedbackCallback feedback_callback_;
+};
 }  // namespace
 
 class D1ArmBridgeNode : public rclcpp::Node
@@ -166,12 +373,13 @@ public:
   D1ArmBridgeNode()
   : Node("d1_arm_bridge"),
     joint_names_(declare_parameter<std::vector<std::string>>("joint_names", DefaultJointNames())),
+    transport_socket_path_(
+      declare_parameter<std::string>("transport_socket_path", DefaultTransportSocketPath())),
     require_enable_before_motion_(declare_parameter<bool>("require_enable_before_motion", true)),
     enable_on_start_(declare_parameter<bool>("enable_on_start", false)),
     zero_on_start_(declare_parameter<bool>("zero_on_start", false)),
     multi_joint_mode_(declare_parameter<int>("multi_joint_mode", 1)),
     lock_force_(declare_parameter<int>("lock_force", 80000)),
-    network_interface_(ResolveNetworkInterface()),
     next_seq_(1),
     motion_authorized_(!require_enable_before_motion_)
   {
@@ -210,12 +418,16 @@ public:
         std::placeholders::_1,
         std::placeholders::_2));
 
-    InitializeDds();
+    transport_client_ = std::make_unique<D1TransportClient>(transport_socket_path_, get_logger());
+    transport_client_->ConnectOrThrow(kTransportConnectTimeout);
+    transport_client_->Start(
+      std::bind(&D1ArmBridgeNode::HandleServoFeedback, this, std::placeholders::_1),
+      std::bind(&D1ArmBridgeNode::HandleRawFeedback, this, std::placeholders::_1));
 
     RCLCPP_INFO(
       get_logger(),
-      "Bridge ready. unitree_interface='%s', require_enable_before_motion=%s, multi_joint_mode=%d, lock_force=%d",
-      network_interface_.empty() ? "<auto>" : network_interface_.c_str(),
+      "Bridge ready. transport_socket='%s', require_enable_before_motion=%s, multi_joint_mode=%d, lock_force=%d",
+      transport_socket_path_.c_str(),
       require_enable_before_motion_ ? "true" : "false",
       multi_joint_mode_,
       lock_force_);
@@ -244,91 +456,23 @@ public:
 
   ~D1ArmBridgeNode() override
   {
-    feedback_subscriber_.reset();
-    servo_subscriber_.reset();
-    command_publisher_.reset();
-    unitree::robot::ChannelFactory::Instance()->Release();
+    transport_client_.reset();
   }
 
 private:
   void ValidateParameters() const
   {
-    if (joint_names_.size() != kJointCount) {
+    if (joint_names_.size() != go2w_d1_arm::ipc::kJointCount) {
       throw std::runtime_error("joint_names parameter must contain exactly 7 entries");
+    }
+    if (transport_socket_path_.empty()) {
+      throw std::runtime_error("transport_socket_path parameter must not be empty");
     }
     if (multi_joint_mode_ != 0 && multi_joint_mode_ != 1) {
       throw std::runtime_error("multi_joint_mode must be 0 or 1");
     }
     if (lock_force_ < 0 || lock_force_ > 80000) {
       throw std::runtime_error("lock_force must be in the range [0, 80000]");
-    }
-  }
-
-  std::string ResolveNetworkInterface()
-  {
-    const auto configured_value = declare_parameter<std::string>("network_interface", "");
-    std::string selected_interface = configured_value;
-    if (selected_interface.empty()) {
-      const char * env_value = std::getenv("UNITREE_NETWORK_INTERFACE");
-      selected_interface = env_value == nullptr ? std::string{} : std::string(env_value);
-    }
-
-    if (selected_interface.empty()) {
-      return selected_interface;
-    }
-
-    const auto available_interfaces = AvailableNetworkInterfaces();
-    if (
-      std::find(
-        available_interfaces.begin(),
-        available_interfaces.end(),
-        selected_interface) == available_interfaces.end())
-    {
-      std::ostringstream message;
-      message
-        << "configured network interface '" << selected_interface
-        << "' was not found. Available interfaces: " << JoinStrings(available_interfaces);
-      throw std::runtime_error(message.str());
-    }
-
-    return selected_interface;
-  }
-
-  void InitializeDds()
-  {
-    try {
-      if (network_interface_.empty()) {
-        unitree::robot::ChannelFactory::Instance()->Init(0);
-      } else {
-        unitree::robot::ChannelFactory::Instance()->Init(0, network_interface_);
-      }
-
-      command_publisher_ =
-        std::make_unique<unitree::robot::ChannelPublisher<unitree_arm::msg::dds_::ArmString_>>(
-        kCommandTopic);
-      command_publisher_->InitChannel();
-
-      servo_subscriber_ =
-        std::make_unique<unitree::robot::ChannelSubscriber<unitree_arm::msg::dds_::PubServoInfo_>>(
-        kServoTopic);
-      servo_subscriber_->InitChannel(
-        std::bind(&D1ArmBridgeNode::HandleServoFeedback, this, std::placeholders::_1),
-        1);
-
-      feedback_subscriber_ =
-        std::make_unique<unitree::robot::ChannelSubscriber<unitree_arm::msg::dds_::ArmString_>>(
-        kFeedbackTopic);
-      feedback_subscriber_->InitChannel(
-        std::bind(&D1ArmBridgeNode::HandleRawFeedback, this, std::placeholders::_1),
-        1);
-    } catch (const std::exception & ex) {
-      std::ostringstream message;
-      message << "DDS/channel initialization failed";
-      if (!network_interface_.empty()) {
-        message << " on interface '" << network_interface_ << "'";
-      }
-      message << ": " << ex.what();
-      throw std::runtime_error(message.str());
     }
   }
 
@@ -383,7 +527,7 @@ private:
     payload
       << "{\"seq\":" << NextSequence()
       << ",\"address\":1,\"funcode\":2,\"data\":{\"mode\":" << multi_joint_mode_;
-    for (std::size_t i = 0; i < kJointCount; ++i) {
+    for (std::size_t i = 0; i < go2w_d1_arm::ipc::kJointCount; ++i) {
       payload << ",\"angle" << i << "\":" << RadiansToDegrees(positions_rad.at(i));
     }
     payload << "}}";
@@ -392,29 +536,14 @@ private:
 
   bool WriteCommand(const std::string & payload, std::string * error_message)
   {
-    std::lock_guard<std::mutex> lock(command_mutex_);
-
-    if (!command_publisher_) {
+    if (!transport_client_) {
       if (error_message != nullptr) {
-        *error_message = "command publisher is not initialized";
+        *error_message = "transport client is not initialized";
       }
       return false;
     }
 
-    try {
-      unitree_arm::msg::dds_::ArmString_ message;
-      message.data_() = payload;
-      const bool success = command_publisher_->Write(message);
-      if (!success && error_message != nullptr) {
-        *error_message = "failed to write to rt/arm_Command";
-      }
-      return success;
-    } catch (const std::exception & ex) {
-      if (error_message != nullptr) {
-        *error_message = ex.what();
-      }
-      return false;
-    }
+    return transport_client_->SendCommand(payload, error_message);
   }
 
   bool MotionAllowed() const
@@ -439,37 +568,24 @@ private:
     arm_status_pub_->publish(status);
   }
 
-  void HandleServoFeedback(const void * message)
+  void HandleServoFeedback(
+    const std::array<double, go2w_d1_arm::ipc::kJointCount> & positions_deg)
   {
-    const auto * servo_info = static_cast<const unitree_arm::msg::dds_::PubServoInfo_ *>(message);
-    if (servo_info == nullptr) {
-      return;
-    }
-
     sensor_msgs::msg::JointState joint_state;
     joint_state.header.stamp = now();
     joint_state.header.frame_id = "d1_arm";
     joint_state.name = joint_names_;
-    joint_state.position.resize(kJointCount);
-    joint_state.position[0] = DegreesToRadians(servo_info->servo0_data_());
-    joint_state.position[1] = DegreesToRadians(servo_info->servo1_data_());
-    joint_state.position[2] = DegreesToRadians(servo_info->servo2_data_());
-    joint_state.position[3] = DegreesToRadians(servo_info->servo3_data_());
-    joint_state.position[4] = DegreesToRadians(servo_info->servo4_data_());
-    joint_state.position[5] = DegreesToRadians(servo_info->servo5_data_());
-    joint_state.position[6] = DegreesToRadians(servo_info->servo6_data_());
+    joint_state.position.resize(go2w_d1_arm::ipc::kJointCount);
+    for (std::size_t i = 0; i < go2w_d1_arm::ipc::kJointCount; ++i) {
+      joint_state.position[i] = DegreesToRadians(positions_deg[i]);
+    }
     joint_state_pub_->publish(joint_state);
   }
 
-  void HandleRawFeedback(const void * message)
+  void HandleRawFeedback(const std::string & payload)
   {
-    const auto * feedback = static_cast<const unitree_arm::msg::dds_::ArmString_ *>(message);
-    if (feedback == nullptr) {
-      return;
-    }
-
     std_msgs::msg::String raw_feedback;
-    raw_feedback.data = feedback->data_();
+    raw_feedback.data = payload;
     raw_feedback_pub_->publish(raw_feedback);
 
     const auto address = ExtractJsonInt(raw_feedback.data, "address");
@@ -509,8 +625,8 @@ private:
     }
 
     if (*address == 2 && *funcode == 4) {
-      std::array<bool, kJointCount> online{};
-      for (std::size_t i = 0; i < kJointCount; ++i) {
+      std::array<bool, go2w_d1_arm::ipc::kJointCount> online{};
+      for (std::size_t i = 0; i < go2w_d1_arm::ipc::kJointCount; ++i) {
         const auto value = ExtractJsonInt(raw_feedback.data, "motor" + std::to_string(i) + "_status");
         if (!value) {
           RCLCPP_WARN(get_logger(), "Failed to parse motor status feedback: %s", raw_feedback.data.c_str());
@@ -546,11 +662,11 @@ private:
 
   void HandleJointCommand(const sensor_msgs::msg::JointState::SharedPtr message)
   {
-    if (message->position.size() != kJointCount) {
+    if (message->position.size() != go2w_d1_arm::ipc::kJointCount) {
       RCLCPP_WARN(
         get_logger(),
         "Joint command ignored: expected %zu positions but received %zu",
-        kJointCount,
+        go2w_d1_arm::ipc::kJointCount,
         message->position.size());
       return;
     }
@@ -641,7 +757,7 @@ private:
     const std::shared_ptr<go2w_d1_arm::srv::SingleJointCommand::Request> request,
     std::shared_ptr<go2w_d1_arm::srv::SingleJointCommand::Response> response)
   {
-    if (request->joint_id >= kJointCount) {
+    if (request->joint_id >= go2w_d1_arm::ipc::kJointCount) {
       response->accepted = false;
       response->message = "joint_id must be in the range [0, 6]";
       return;
@@ -665,21 +781,20 @@ private:
   }
 
   std::vector<std::string> joint_names_;
+  std::string transport_socket_path_;
   bool require_enable_before_motion_;
   bool enable_on_start_;
   bool zero_on_start_;
   int multi_joint_mode_;
   int lock_force_;
-  std::string network_interface_;
   std::atomic<uint32_t> next_seq_;
   std::atomic_bool motion_authorized_;
 
-  std::mutex command_mutex_;
   std::mutex state_mutex_;
   bool enabled_ = false;
   bool powered_ = false;
   bool healthy_ = false;
-  std::array<bool, kJointCount> motor_online_{};
+  std::array<bool, go2w_d1_arm::ipc::kJointCount> motor_online_{};
 
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_state_pub_;
   rclcpp::Publisher<go2w_d1_arm::msg::D1ArmStatus>::SharedPtr arm_status_pub_;
@@ -692,12 +807,7 @@ private:
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr zero_srv_;
   rclcpp::Service<go2w_d1_arm::srv::SingleJointCommand>::SharedPtr single_joint_srv_;
 
-  std::unique_ptr<unitree::robot::ChannelPublisher<unitree_arm::msg::dds_::ArmString_>>
-    command_publisher_;
-  std::unique_ptr<unitree::robot::ChannelSubscriber<unitree_arm::msg::dds_::PubServoInfo_>>
-    servo_subscriber_;
-  std::unique_ptr<unitree::robot::ChannelSubscriber<unitree_arm::msg::dds_::ArmString_>>
-    feedback_subscriber_;
+  std::unique_ptr<D1TransportClient> transport_client_;
 };
 
 int main(int argc, char ** argv)

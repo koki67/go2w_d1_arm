@@ -16,7 +16,7 @@ def generate_launch_description():
                     [FindPackageShare("go2w_d1_arm"), "config", "d1_arm_params.yaml"]
                 ),
             ),
-            DeclareLaunchArgument("network_interface", default_value=""),
+            DeclareLaunchArgument("transport_socket_path", default_value="/tmp/go2w_d1_arm.sock"),
             DeclareLaunchArgument("enable_on_start", default_value="false"),
             DeclareLaunchArgument("zero_on_start", default_value="false"),
             DeclareLaunchArgument("require_enable_before_motion", default_value="true"),
@@ -30,7 +30,7 @@ def generate_launch_description():
                 parameters=[
                     params_file,
                     {
-                        "network_interface": LaunchConfiguration("network_interface"),
+                        "transport_socket_path": LaunchConfiguration("transport_socket_path"),
                         "enable_on_start": LaunchConfiguration("enable_on_start"),
                         "zero_on_start": LaunchConfiguration("zero_on_start"),
                         "require_enable_before_motion": LaunchConfiguration(
@@ -43,4 +43,3 @@ def generate_launch_description():
             ),
         ]
     )
-
