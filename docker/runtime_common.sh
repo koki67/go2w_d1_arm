@@ -70,6 +70,7 @@ print_runtime_summary() {
   echo "[go2w_d1_arm] UNITREE_NETWORK_INTERFACE=${UNITREE_NETWORK_INTERFACE:-<unset>}"
   echo "[go2w_d1_arm] ROS_NETWORK_INTERFACE=${ROS_NETWORK_INTERFACE:-<unset>}"
   echo "[go2w_d1_arm] D1_TRANSPORT_SOCKET_PATH=${D1_TRANSPORT_SOCKET_PATH:-<unset>}"
+  echo "[go2w_d1_arm] D1_TRANSPORT_LIBRARY_DIR=${D1_TRANSPORT_LIBRARY_DIR:-<unset>}"
   echo "[go2w_d1_arm] CYCLONEDDS_URI=${CYCLONEDDS_URI:-<unset>}"
   echo "[go2w_d1_arm] ROS_CYCLONEDDS_URI=${ROS_CYCLONEDDS_URI:-<unset>}"
   echo "[go2w_d1_arm] D1_TRANSPORT_CYCLONEDDS_URI=${D1_TRANSPORT_CYCLONEDDS_URI:-<unset>}"
@@ -82,6 +83,8 @@ validate_runtime_artifacts() {
   require_file /ros2_ws/install/setup.bash "workspace setup"
   require_file /ros2_ws/install/go2w_d1_arm/lib/go2w_d1_arm/d1_arm_bridge_node "bridge executable"
   require_file /ros2_ws/install/go2w_d1_arm/lib/go2w_d1_arm/d1_arm_transport "transport executable"
+  require_file "${D1_TRANSPORT_LIBRARY_DIR}/libddscxx.so.0" "CycloneDDS C++ transport library"
+  require_file "${D1_TRANSPORT_LIBRARY_DIR}/libddsc.so.0" "CycloneDDS C transport library"
 }
 
 validate_selected_interface() {

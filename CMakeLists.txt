@@ -57,6 +57,12 @@ if(NOT DDSCXX_INCLUDE_DIR OR NOT DDSC_INCLUDE_DIR OR NOT DDSCXX_LIBRARY OR NOT D
   message(FATAL_ERROR "CycloneDDS C/C++ headers or libraries were not found. Populate third_party/unitree_sdk2 or install CycloneDDS development packages.")
 endif()
 
+get_filename_component(DDS_LIBRARY_DIR "${DDSCXX_LIBRARY}" DIRECTORY)
+file(GLOB DDS_RUNTIME_LIBS
+  "${DDS_LIBRARY_DIR}/libddsc.so*"
+  "${DDS_LIBRARY_DIR}/libddscxx.so*"
+)
+
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/D1ArmStatus.msg"
   "srv/SingleJointCommand.srv"
@@ -65,8 +71,6 @@ rosidl_generate_interfaces(${PROJECT_NAME}
 
 add_executable(d1_arm_bridge_node
   src/d1_arm_bridge_node.cpp
-  src/msg/ArmString_.cpp
-  src/msg/PubServoInfo_.cpp
 )
 
 add_executable(d1_arm_transport
@@ -79,20 +83,22 @@ foreach(target_name d1_arm_bridge_node d1_arm_transport)
   target_compile_features(${target_name} PRIVATE cxx_std_17)
   target_include_directories(${target_name} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${DDSCXX_INCLUDE_DIR}
-    ${DDSC_INCLUDE_DIR}
-  )
-  target_link_libraries(${target_name}
-    ${DDSCXX_LIBRARY}
-    ${DDSC_LIBRARY}
-    Threads::Threads
-  )
-  get_filename_component(DDS_LIBRARY_DIR "${DDSCXX_LIBRARY}" DIRECTORY)
-  set_target_properties(${target_name} PROPERTIES
-    BUILD_RPATH "${DDS_LIBRARY_DIR}"
-    INSTALL_RPATH "$ORIGIN"
   )
 endforeach()
+
+target_include_directories(d1_arm_transport PRIVATE
+  ${DDSCXX_INCLUDE_DIR}
+  ${DDSC_INCLUDE_DIR}
+)
+target_link_libraries(d1_arm_transport
+  ${DDSCXX_LIBRARY}
+  ${DDSC_LIBRARY}
+  Threads::Threads
+)
+set_target_properties(d1_arm_transport PROPERTIES
+  BUILD_RPATH "${DDS_LIBRARY_DIR}"
+  INSTALL_RPATH "$ORIGIN"
+)
 
 ament_target_dependencies(d1_arm_bridge_node
   rclcpp
@@ -114,8 +120,7 @@ install(TARGETS d1_arm_bridge_node d1_arm_transport
 )
 
 install(FILES
-  ${DDSCXX_LIBRARY}
-  ${DDSC_LIBRARY}
+  ${DDS_RUNTIME_LIBS}
   DESTINATION lib/${PROJECT_NAME}
 )
 
