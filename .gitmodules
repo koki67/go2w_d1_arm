@@ -1,3 +1,6 @@
-[submodule "third_party/unitree_sdk2"]
-	path = third_party/unitree_sdk2
-	url = https://github.com/koki67/unitree_sdk2.git
+[submodule "third_party/cyclonedds-cxx"]
+	path = third_party/cyclonedds-cxx
+	url = https://github.com/eclipse-cyclonedds/cyclonedds-cxx.git
+[submodule "third_party/cyclonedds"]
+	path = third_party/cyclonedds
+	url = https://github.com/eclipse-cyclonedds/cyclonedds.git

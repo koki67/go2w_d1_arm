@@ -39,6 +39,23 @@ function(resolve_d1_sdk_root out_var)
   set(${out_var} "" PARENT_SCOPE)
 endfunction()
 
+function(get_imported_library_location target out_var)
+  foreach(prop
+      IMPORTED_LOCATION
+      IMPORTED_LOCATION_RELEASE
+      IMPORTED_LOCATION_RELWITHDEBINFO
+      IMPORTED_LOCATION_MINSIZEREL
+      IMPORTED_LOCATION_DEBUG)
+    get_target_property(candidate "${target}" "${prop}")
+    if(candidate AND NOT candidate STREQUAL "candidate-NOTFOUND")
+      set(${out_var} "${candidate}" PARENT_SCOPE)
+      return()
+    endif()
+  endforeach()
+
+  set(${out_var} "" PARENT_SCOPE)
+endfunction()
+
 set(D1_SDK_SEARCH_ROOTS)
 if(DEFINED D1_SDK_ROOT AND NOT "${D1_SDK_ROOT}" STREQUAL "")
   list(APPEND D1_SDK_SEARCH_ROOTS "${D1_SDK_ROOT}")
@@ -69,56 +86,25 @@ if(NOT GO2W_D1_ARM_BUILD_TRANSPORT STREQUAL "OFF")
   resolve_d1_sdk_root(D1_SDK_ROOT_RESOLVED ${D1_SDK_SEARCH_ROOTS})
 
   if(D1_SDK_ROOT_RESOLVED)
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
-      set(UNITREE_THIRDPARTY_ARCH aarch64)
-    else()
-      set(UNITREE_THIRDPARTY_ARCH x86_64)
-    endif()
+    find_package(CycloneDDS REQUIRED)
+    find_package(CycloneDDS-CXX REQUIRED)
 
-    find_path(
-      DDSCXX_INCLUDE_DIR
-      dds/topic/TopicTraits.hpp
-      PATHS
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/unitree_sdk2/thirdparty/include/ddscxx"
-        /usr/include/ddscxx
-    )
+    get_imported_library_location(CycloneDDS::ddsc DDSC_LIBRARY)
+    get_imported_library_location(CycloneDDS-CXX::ddscxx DDSCXX_LIBRARY)
 
-    find_path(
-      DDSC_INCLUDE_DIR
-      dds/dds.h
-      PATHS
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/unitree_sdk2/thirdparty/include"
-        /usr/include
-    )
-
-    find_library(
-      DDSCXX_LIBRARY
-      NAMES ddscxx
-      PATHS
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/unitree_sdk2/thirdparty/lib/${UNITREE_THIRDPARTY_ARCH}"
-        /usr/lib
-        /usr/lib/${CMAKE_LIBRARY_ARCHITECTURE}
-    )
-
-    find_library(
-      DDSC_LIBRARY
-      NAMES ddsc
-      PATHS
-        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/unitree_sdk2/thirdparty/lib/${UNITREE_THIRDPARTY_ARCH}"
-        /usr/lib
-        /usr/lib/${CMAKE_LIBRARY_ARCHITECTURE}
-    )
-
-    if(NOT DDSCXX_INCLUDE_DIR OR NOT DDSC_INCLUDE_DIR OR NOT DDSCXX_LIBRARY OR NOT DDSC_LIBRARY)
+    if(NOT DDSC_LIBRARY OR NOT DDSCXX_LIBRARY)
       message(FATAL_ERROR
-        "CycloneDDS C/C++ headers or libraries were not found. Populate third_party/unitree_sdk2 or install CycloneDDS development packages.")
+        "CycloneDDS or CycloneDDS-CXX library locations could not be resolved. "
+        "Install CycloneDDS plus CycloneDDS-CXX and ensure CMAKE_PREFIX_PATH points to them.")
     endif()
 
-    get_filename_component(DDS_LIBRARY_DIR "${DDSCXX_LIBRARY}" DIRECTORY)
+    get_filename_component(DDSC_LIBRARY_DIR "${DDSC_LIBRARY}" DIRECTORY)
+    get_filename_component(DDSCXX_LIBRARY_DIR "${DDSCXX_LIBRARY}" DIRECTORY)
     file(GLOB DDS_RUNTIME_LIBS
-      "${DDS_LIBRARY_DIR}/libddsc.so*"
-      "${DDS_LIBRARY_DIR}/libddscxx.so*"
+      "${DDSC_LIBRARY_DIR}/libddsc.so*"
+      "${DDSCXX_LIBRARY_DIR}/libddscxx.so*"
     )
+    list(REMOVE_DUPLICATES DDS_RUNTIME_LIBS)
 
     add_executable(d1_arm_transport
       src/d1_arm_transport.cpp
@@ -154,18 +140,14 @@ foreach(target_name IN LISTS GO2W_D1_ARM_TARGETS)
 endforeach()
 
 if(GO2W_D1_ARM_TRANSPORT_ENABLED)
-  target_include_directories(d1_arm_transport SYSTEM PRIVATE
-    ${DDSCXX_INCLUDE_DIR}
-    ${DDSC_INCLUDE_DIR}
+  target_include_directories(d1_arm_transport PRIVATE
     "${D1_SDK_ROOT_RESOLVED}/src"
   )
   target_link_libraries(d1_arm_transport
-    ${DDSCXX_LIBRARY}
-    ${DDSC_LIBRARY}
+    CycloneDDS-CXX::ddscxx
     Threads::Threads
   )
   set_target_properties(d1_arm_transport PROPERTIES
-    BUILD_RPATH "${DDS_LIBRARY_DIR}"
     INSTALL_RPATH "$ORIGIN"
   )
 endif()

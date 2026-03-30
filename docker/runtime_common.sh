@@ -83,8 +83,23 @@ validate_runtime_artifacts() {
   require_file /ros2_ws/install/setup.bash "workspace setup"
   require_file /ros2_ws/install/go2w_d1_arm/lib/go2w_d1_arm/d1_arm_bridge_node "bridge executable"
   require_file /ros2_ws/install/go2w_d1_arm/lib/go2w_d1_arm/d1_arm_transport "transport executable"
-  require_file "${D1_TRANSPORT_LIBRARY_DIR}/libddscxx.so.0" "CycloneDDS C++ transport library"
-  require_file "${D1_TRANSPORT_LIBRARY_DIR}/libddsc.so.0" "CycloneDDS C transport library"
+  require_shared_library libddscxx.so.0 "CycloneDDS C++ transport library"
+  require_shared_library libddsc.so.0 "CycloneDDS C transport library"
+}
+
+require_shared_library() {
+  local soname="$1"
+  local description="$2"
+
+  if [ -n "${D1_TRANSPORT_LIBRARY_DIR:-}" ] && [ -e "${D1_TRANSPORT_LIBRARY_DIR}/${soname}" ]; then
+    return
+  fi
+
+  if command -v ldconfig >/dev/null 2>&1 && ldconfig -p 2>/dev/null | grep -Fq "${soname}"; then
+    return
+  fi
+
+  runtime_error "${description} is missing (${soname})"
 }
 
 validate_selected_interface() {

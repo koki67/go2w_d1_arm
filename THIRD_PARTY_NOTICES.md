@@ -4,9 +4,13 @@ This repository contains original bridge code under the root [LICENSE](LICENSE).
 
 It also uses the following third-party components:
 
-- `third_party/unitree_sdk2`
-  Source: https://github.com/unitreerobotics/unitree_sdk2
-  License: BSD-3-Clause
+- `third_party/cyclonedds`
+  Source: https://github.com/eclipse-cyclonedds/cyclonedds
+  License: EPL-2.0 OR BSD-3-Clause
+
+- `third_party/cyclonedds-cxx`
+  Source: https://github.com/eclipse-cyclonedds/cyclonedds-cxx
+  License: EPL-2.0 OR BSD-3-Clause
 
 ## Unitree D1 SDK Package
 

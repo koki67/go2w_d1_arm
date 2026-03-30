@@ -72,7 +72,10 @@ If you already cloned the repository without submodules, initialize them with:
 git submodule update --init --recursive
 ```
 
-The `third_party/unitree_sdk2` submodule is kept only for the vendored CycloneDDS headers and libraries used by this package.
+The repository uses two official Eclipse CycloneDDS submodules for the raw D1 transport process:
+
+- `third_party/cyclonedds`
+- `third_party/cyclonedds-cxx`
 
 This repository does not redistribute Unitree's D1 arm SDK package.
 
@@ -107,9 +110,14 @@ or:
 colcon build --packages-select go2w_d1_arm --cmake-args -DD1_SDK_ROOT=/absolute/path/to/d1_sdk
 ```
 
+Full non-Docker transport builds also require CycloneDDS plus CycloneDDS-CXX to be installed locally. The default robot workflow avoids that extra setup by building those dependencies inside Docker.
+
 ## Robot Quick Start
 
-Before `make build`, make sure you have downloaded Unitree's `D1Arm_services` package into `third_party/d1_sdk`.
+Before `make build`, make sure you have:
+
+- initialized Git submodules
+- downloaded Unitree's `D1Arm_services` package into `third_party/d1_sdk`
 
 Build the container image:
 
@@ -147,6 +155,8 @@ The bridge is healthy when:
 - `make ps` shows the container as `Up`
 - `make logs` shows both the raw D1 transport and the ROS 2 bridge starting
 - the logs contain `transport client connected`
+
+`make build` compiles the official CycloneDDS core and CycloneDDS-CXX dependencies from `third_party/cyclonedds` and `third_party/cyclonedds-cxx` inside the Docker image, so no Unitree SDK bundle is used for DDS support.
 
 ## Desktop PC Quick Start
 
@@ -378,6 +388,16 @@ Make sure these files exist before rebuilding:
 ```bash
 third_party/d1_sdk/src/msg/ArmString_.hpp
 third_party/d1_sdk/src/msg/PubServoInfo_.hpp
+```
+
+### `make build` fails because `cyclonedds` or `cyclonedds-cxx` is missing
+
+The repository expects the official CycloneDDS submodules to be initialized locally.
+
+Run:
+
+```bash
+git submodule update --init --recursive
 ```
 
 ## Notes

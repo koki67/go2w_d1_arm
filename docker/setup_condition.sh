@@ -17,21 +17,24 @@ export ROS_NETWORK_INTERFACE="${ROS_NETWORK_INTERFACE:-wlan0}"
 
 case "$(uname -m)" in
   aarch64|arm64)
-    unitree_thirdparty_arch="aarch64"
+    system_library_dir="/usr/lib/aarch64-linux-gnu"
     ;;
   *)
-    unitree_thirdparty_arch="x86_64"
+    system_library_dir="/usr/lib/x86_64-linux-gnu"
     ;;
 esac
 
 installed_transport_lib_dir="/ros2_ws/install/go2w_d1_arm/lib/go2w_d1_arm"
-vendored_transport_lib_dir="/ros2_ws/src/go2w_d1_arm/third_party/unitree_sdk2/thirdparty/lib/${unitree_thirdparty_arch}"
 
 if [ -z "${D1_TRANSPORT_LIBRARY_DIR:-}" ]; then
   if [ -e "${installed_transport_lib_dir}/libddscxx.so.0" ]; then
     export D1_TRANSPORT_LIBRARY_DIR="${installed_transport_lib_dir}"
+  elif [ -e "/usr/local/lib/libddscxx.so.0" ]; then
+    export D1_TRANSPORT_LIBRARY_DIR="/usr/local/lib"
+  elif [ -e "${system_library_dir}/libddscxx.so.0" ]; then
+    export D1_TRANSPORT_LIBRARY_DIR="${system_library_dir}"
   else
-    export D1_TRANSPORT_LIBRARY_DIR="${vendored_transport_lib_dir}"
+    export D1_TRANSPORT_LIBRARY_DIR=""
   fi
 fi
 

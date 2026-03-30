@@ -4,6 +4,7 @@ build
 install
 log
 docker/.env
-third_party/unitree_sdk2/.git
+third_party/cyclonedds/.git
+third_party/cyclonedds-cxx/.git
 __pycache__/
 *.pyc
