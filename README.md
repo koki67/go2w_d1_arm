@@ -74,7 +74,42 @@ git submodule update --init --recursive
 
 The `third_party/unitree_sdk2` submodule is kept only for the vendored CycloneDDS headers and libraries used by this package.
 
+This repository does not redistribute Unitree's D1 arm SDK package.
+
+For the robot-side transport, download `D1Arm_services` from Unitree and place it at:
+
+```bash
+third_party/d1_sdk
+```
+
+The local package should contain at least:
+
+```bash
+third_party/d1_sdk/src/msg/ArmString_.hpp
+third_party/d1_sdk/src/msg/PubServoInfo_.hpp
+```
+
+Download source:
+
+- https://support.unitree.com/home/en/developer/D1Arm_services
+
+`third_party/d1_sdk` is ignored by Git so each user provides their own local copy.
+
+If you build outside Docker, you can also point CMake at a local SDK checkout with either:
+
+```bash
+export D1_SDK_ROOT=/absolute/path/to/d1_sdk
+```
+
+or:
+
+```bash
+colcon build --packages-select go2w_d1_arm --cmake-args -DD1_SDK_ROOT=/absolute/path/to/d1_sdk
+```
+
 ## Robot Quick Start
+
+Before `make build`, make sure you have downloaded Unitree's `D1Arm_services` package into `third_party/d1_sdk`.
 
 Build the container image:
 
@@ -169,9 +204,11 @@ Then build it from the workspace root, not from `src`:
 ```bash
 cd <your_workspace>
 source /opt/ros/humble/setup.bash
-colcon build --packages-select go2w_d1_arm
+colcon build --packages-select go2w_d1_arm --cmake-args -DGO2W_D1_ARM_BUILD_TRANSPORT=OFF
 source install/setup.bash
 ```
+
+That desktop build path keeps the custom ROS 2 interfaces and bridge code, but skips the raw D1 transport executable, so the desktop does not need a local `D1Arm_services` download just to call `/single_joint_command`.
 
 Quick sanity check:
 
@@ -324,6 +361,23 @@ If your robot uses different interface names, override them when launching:
 ```bash
 UNITREE_NETWORK_INTERFACE=<robot-arm-nic> ROS_NETWORK_INTERFACE=<robot-ros-nic> make doctor
 UNITREE_NETWORK_INTERFACE=<robot-arm-nic> ROS_NETWORK_INTERFACE=<robot-ros-nic> make up
+```
+
+### `make build` fails because `d1_sdk` is missing
+
+The robot-side Docker build requires a user-provided local copy of Unitree's `D1Arm_services` package.
+
+Download it from Unitree, then place it at:
+
+```bash
+third_party/d1_sdk
+```
+
+Make sure these files exist before rebuilding:
+
+```bash
+third_party/d1_sdk/src/msg/ArmString_.hpp
+third_party/d1_sdk/src/msg/PubServoInfo_.hpp
 ```
 
 ## Notes

@@ -4,3 +4,4 @@ log/
 .DS_Store
 __pycache__/
 *.pyc
+third_party/d1_sdk/

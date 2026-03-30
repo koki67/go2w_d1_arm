@@ -22,8 +22,13 @@ COPY . /ros2_ws/src/go2w_d1_arm
 WORKDIR /ros2_ws
 
 RUN /bin/bash -lc "\
+    if [ ! -f /ros2_ws/src/go2w_d1_arm/third_party/d1_sdk/src/msg/ArmString_.hpp ] || \
+       [ ! -f /ros2_ws/src/go2w_d1_arm/third_party/d1_sdk/src/msg/PubServoInfo_.hpp ]; then \
+      echo 'Missing third_party/d1_sdk. Download Unitree D1Arm_services and place it under third_party/d1_sdk before running make build.' >&2; \
+      exit 1; \
+    fi && \
     source /opt/ros/humble/setup.bash && \
-    colcon build --packages-select go2w_d1_arm \
+    colcon build --packages-select go2w_d1_arm --cmake-args -DGO2W_D1_ARM_BUILD_TRANSPORT=ON \
     "
 
 COPY docker/entrypoint.sh /entrypoint.sh
