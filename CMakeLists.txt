@@ -86,7 +86,7 @@ foreach(target_name d1_arm_bridge_node d1_arm_transport)
   )
 endforeach()
 
-target_include_directories(d1_arm_transport PRIVATE
+target_include_directories(d1_arm_transport SYSTEM PRIVATE
   ${DDSCXX_INCLUDE_DIR}
   ${DDSC_INCLUDE_DIR}
 )
