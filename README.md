@@ -4,6 +4,21 @@
 
 This repository runs the arm-side DDS transport on the robot's internal network and exposes a normal ROS 2 interface over WiFi so a desktop PC can monitor the arm and send commands wirelessly.
 
+## Table of Contents
+
+- [Overview](#overview)
+- [Network Contract](#network-contract)
+- [Repository Setup](#repository-setup)
+- [Robot Quick Start](#robot-quick-start)
+- [Desktop PC Quick Start](#desktop-pc-quick-start)
+  - [Minimal Setup](#minimal-setup)
+  - [If You Want `/single_joint_command`](#if-you-want-single_joint_command)
+- [First End-to-End Checks](#first-end-to-end-checks)
+- [ROS Interface Summary](#ros-interface-summary)
+- [Default Motion Behavior](#default-motion-behavior)
+- [Troubleshooting](#troubleshooting)
+- [Notes](#notes)
+
 ## Overview
 
 This repository provides:
@@ -44,7 +59,14 @@ UNITREE_NETWORK_INTERFACE=<robot-arm-nic> ROS_NETWORK_INTERFACE=<robot-ros-nic> 
 
 ## Repository Setup
 
-Clone with submodules, or initialize the submodule after cloning:
+Clone with submodules:
+
+```bash
+git clone --recurse-submodules https://github.com/koki67/go2w_d1_arm.git
+cd go2w_d1_arm
+```
+
+If you already cloned the repository without submodules, initialize them with:
 
 ```bash
 git submodule update --init --recursive
@@ -136,7 +158,7 @@ Add this repository to a desktop ROS 2 workspace:
 <your_workspace>/src/go2w_d1_arm
 ```
 
-If you use the `go2w-docker-dev` desktop container, the typical path is:
+If you use the [`go2w-docker-dev`](https://github.com/koki67/go2w-docker-dev) desktop container, the typical path is:
 
 ```bash
 /workspace/ros2_ws/src/go2w_d1_arm
